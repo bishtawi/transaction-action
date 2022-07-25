@@ -1,29 +1,26 @@
-use std::collections::HashMap;
-
-use anyhow::{anyhow, bail, Result};
+use crate::{ClientID, Error};
 use rust_decimal::Decimal;
-
-use crate::dtos::ClientID;
+use std::collections::HashMap;
 
 // DAO (representation of what would be our Clients table in the database)
 #[derive(Default)]
-pub struct Client {
-    pub available_amount: Decimal,
-    pub held_amount: Decimal,
-    pub locked: bool,
+pub(crate) struct Client {
+    pub(crate) available_amount: Decimal,
+    pub(crate) held_amount: Decimal,
+    pub(crate) locked: bool,
 }
 
 // In a proper implementation, the Clients store would connect to a database instead of being an in-memory store
 #[derive(Default)]
-pub struct Clients {
-    database: HashMap<ClientID, Client>,
+pub(crate) struct Clients {
+    pub(crate) database: HashMap<ClientID, Client>,
 }
 
 impl Clients {
-    pub fn deposit(&mut self, id: ClientID, amount: Decimal) -> Result<()> {
+    pub(crate) fn deposit(&mut self, id: ClientID, amount: Decimal) -> Result<(), Error> {
         let client = self.database.entry(id).or_insert_with(Client::default);
         if client.locked {
-            bail!("Client {} is locked", id);
+            return Err(Error::ClientLocked(id));
         }
 
         client.available_amount += amount;
@@ -31,23 +28,22 @@ impl Clients {
         Ok(())
     }
 
-    pub fn withdrawal(&mut self, id: ClientID, amount: Decimal) -> Result<()> {
+    pub(crate) fn withdrawal(&mut self, id: ClientID, amount: Decimal) -> Result<(), Error> {
         let client = self
             .database
             .get_mut(&id)
-            .ok_or_else(|| anyhow!("Client {} does not exist", id))?;
+            .ok_or(Error::ClientNotExist(id))?;
         if client.locked {
-            bail!("Client {} is locked", id);
+            return Err(Error::ClientLocked(id));
         }
 
         let new_amount = client.available_amount - amount;
         if new_amount.is_sign_negative() {
-            bail!(
-                "Client {} cannot withdrawl {} as available balance is {}",
+            return Err(Error::ClientCannotWithdrawl {
                 id,
                 amount,
-                client.available_amount
-            );
+                available: client.available_amount,
+            });
         }
 
         client.available_amount = new_amount;
@@ -55,23 +51,22 @@ impl Clients {
         Ok(())
     }
 
-    pub fn move_to_held(&mut self, id: ClientID, amount: Decimal) -> Result<()> {
+    pub(crate) fn move_to_held(&mut self, id: ClientID, amount: Decimal) -> Result<(), Error> {
         let client = self
             .database
             .get_mut(&id)
-            .ok_or_else(|| anyhow!("Client {} does not exist", id))?;
+            .ok_or(Error::ClientNotExist(id))?;
         if client.locked {
-            bail!("Client {} is locked", id);
+            return Err(Error::ClientLocked(id));
         }
 
         let new_available = client.available_amount - amount;
         if new_available.is_sign_negative() {
-            bail!(
-                "Client {} cannot hold {} as available balance is {}",
+            return Err(Error::ClientCannotDispute {
                 id,
                 amount,
-                client.available_amount
-            );
+                available: client.available_amount,
+            });
         }
 
         client.available_amount = new_available;
@@ -80,23 +75,22 @@ impl Clients {
         Ok(())
     }
 
-    pub fn move_to_available(&mut self, id: ClientID, amount: Decimal) -> Result<()> {
+    pub(crate) fn move_to_available(&mut self, id: ClientID, amount: Decimal) -> Result<(), Error> {
         let client = self
             .database
             .get_mut(&id)
-            .ok_or_else(|| anyhow!("Client {} does not exist", id))?;
+            .ok_or(Error::ClientNotExist(id))?;
         if client.locked {
-            bail!("Client {} is locked", id);
+            return Err(Error::ClientLocked(id));
         }
 
         let new_held = client.held_amount - amount;
         if new_held.is_sign_negative() {
-            bail!(
-                "Client {} cannot free {} as held balance is {}",
+            return Err(Error::ClientCannotResolve {
                 id,
                 amount,
-                client.held_amount
-            );
+                held: client.held_amount,
+            });
         }
 
         client.held_amount = new_held;
@@ -105,35 +99,32 @@ impl Clients {
         Ok(())
     }
 
-    pub fn chargeback(&mut self, id: ClientID, amount: Decimal) -> Result<()> {
+    pub(crate) fn chargeback(&mut self, id: ClientID, amount: Decimal) -> Result<(), Error> {
         let client = self
             .database
             .get_mut(&id)
-            .ok_or_else(|| anyhow!("Client {} does not exist", id))?;
+            .ok_or(Error::ClientNotExist(id))?;
         if client.locked {
-            bail!("Client {} is locked", id);
+            return Err(Error::ClientLocked(id));
         }
 
         client.locked = true;
 
         let new_held = client.held_amount - amount;
         if new_held.is_sign_negative() {
-            bail!(
-                "Client {} cannot chargeback {} as held balance is {}",
+            return Err(Error::ClientCannotChargeBack {
                 id,
                 amount,
-                client.held_amount
-            );
+                held: client.held_amount,
+            });
         }
 
         client.held_amount = new_held;
         Ok(())
     }
 
-    pub fn get_client(&self, id: ClientID) -> Result<&Client> {
-        self.database
-            .get(&id)
-            .ok_or_else(|| anyhow!("Client {} does not exist", id))
+    pub(crate) fn get_all(&self) -> &HashMap<ClientID, Client> {
+        &self.database
     }
 }
 
@@ -141,11 +132,10 @@ impl Clients {
 mod tests {
     use super::*;
 
-    use anyhow::Result;
     use rust_decimal_macros::dec;
 
     #[test]
-    fn test_deposit() -> Result<()> {
+    fn test_deposit() -> Result<(), Error> {
         let mut clients = Clients::default();
         assert_eq!(
             clients.database.len(),
@@ -212,8 +202,9 @@ mod tests {
 
         // Should fail to deposit money if client is locked
         clients.database.get_mut(&other_client_id).unwrap().locked = true;
-        assert!(
-            clients.deposit(other_client_id, dec!(1)).is_err(),
+        assert_eq!(
+            clients.deposit(other_client_id, dec!(1)),
+            Err(Error::ClientLocked(other_client_id)),
             "should fail to deposit money as client is locked"
         );
         assert_eq!(
@@ -226,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn test_withdrawal() -> Result<()> {
+    fn test_withdrawal() -> Result<(), Error> {
         let mut clients = Clients::default();
 
         let client_id = 111;
@@ -277,8 +268,13 @@ mod tests {
         );
 
         // Cannot withdrawl higher than available amount
-        assert!(
-            clients.withdrawal(other_client_id, dec!(1)).is_err(),
+        assert_eq!(
+            clients.withdrawal(other_client_id, dec!(1)),
+            Err(Error::ClientCannotWithdrawl {
+                id: other_client_id,
+                amount: dec!(1),
+                available: dec!(0.6)
+            }),
             "should fail to withdrawl higher than available amount"
         );
         assert_eq!(
@@ -288,8 +284,9 @@ mod tests {
         );
 
         // Cannot withdrawl from locked account
-        assert!(
-            clients.withdrawal(locked_client_id, dec!(1)).is_err(),
+        assert_eq!(
+            clients.withdrawal(locked_client_id, dec!(1)),
+            Err(Error::ClientLocked(locked_client_id)),
             "should fail to withdrawl from locked account"
         );
         assert_eq!(
@@ -299,8 +296,9 @@ mod tests {
         );
 
         // Cannot withdrawl from non-existant account
-        assert!(
-            clients.withdrawal(non_exist_client_id, dec!(1)).is_err(),
+        assert_eq!(
+            clients.withdrawal(non_exist_client_id, dec!(1)),
+            Err(Error::ClientNotExist(non_exist_client_id)),
             "should fail to withdrawl from non existant account"
         );
 
@@ -308,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn test_move_to_held() -> Result<()> {
+    fn test_move_to_held() -> Result<(), Error> {
         let mut clients = Clients::default();
 
         let client_id = 94;
@@ -353,8 +351,13 @@ mod tests {
         );
 
         // Should fail to move more funds than available
-        assert!(
-            clients.move_to_held(other_client_id, dec!(12.01)).is_err(),
+        assert_eq!(
+            clients.move_to_held(other_client_id, dec!(12.01)),
+            Err(Error::ClientCannotDispute {
+                id: other_client_id,
+                amount: dec!(12.01),
+                available: dec!(12)
+            }),
             "should fail to move more funds than available"
         );
         assert_eq!(
@@ -369,8 +372,9 @@ mod tests {
         );
 
         // Should fail to move funds on a locked account
-        assert!(
-            clients.move_to_held(locked_client_id, dec!(1)).is_err(),
+        assert_eq!(
+            clients.move_to_held(locked_client_id, dec!(1)),
+            Err(Error::ClientLocked(locked_client_id)),
             "should fail to move funds on a locked account"
         );
         assert_eq!(
@@ -388,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn test_move_to_available() -> Result<()> {
+    fn test_move_to_available() -> Result<(), Error> {
         let mut clients = Clients::default();
 
         let client_id = 94;
@@ -433,10 +437,13 @@ mod tests {
         );
 
         // Should fail to move more funds than held
-        assert!(
-            clients
-                .move_to_available(other_client_id, dec!(31.01))
-                .is_err(),
+        assert_eq!(
+            clients.move_to_available(other_client_id, dec!(31.01)),
+            Err(Error::ClientCannotResolve {
+                id: other_client_id,
+                amount: dec!(31.01),
+                held: dec!(31)
+            }),
             "should fail to move more funds than in held"
         );
         assert_eq!(
@@ -451,10 +458,9 @@ mod tests {
         );
 
         // Should fail to move funds on a locked account
-        assert!(
-            clients
-                .move_to_available(locked_client_id, dec!(1))
-                .is_err(),
+        assert_eq!(
+            clients.move_to_available(locked_client_id, dec!(1)),
+            Err(Error::ClientLocked(locked_client_id)),
             "should fail to move funds on a locked account"
         );
         assert_eq!(
@@ -472,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn test_chargeback() -> Result<()> {
+    fn test_chargeback() -> Result<(), Error> {
         let mut clients = Clients::default();
 
         let client_id = 94;
@@ -521,8 +527,13 @@ mod tests {
         );
 
         // Should fail to chargeback if amount is higher than held
-        assert!(
-            clients.chargeback(other_client_id, dec!(31.01)).is_err(),
+        assert_eq!(
+            clients.chargeback(other_client_id, dec!(31.01)),
+            Err(Error::ClientCannotChargeBack {
+                id: other_client_id,
+                amount: dec!(31.01),
+                held: dec!(31)
+            }),
             "should fail chargeback if not enough money in held"
         );
         assert_eq!(
@@ -541,8 +552,9 @@ mod tests {
         );
 
         // Should fail to chargeback an already locked account
-        assert!(
-            clients.chargeback(locked_client_id, dec!(1)).is_err(),
+        assert_eq!(
+            clients.chargeback(locked_client_id, dec!(1)),
+            Err(Error::ClientLocked(locked_client_id)),
             "should fail to chargeback an already locked account"
         );
         assert_eq!(
@@ -558,37 +570,6 @@ mod tests {
         assert!(
             clients.database[&locked_client_id].locked,
             "client should still be locked"
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_get_client() -> Result<()> {
-        let mut clients = Clients::default();
-
-        let client_id = 12;
-        let missing_client_id = 13;
-
-        clients.database.insert(
-            client_id,
-            Client {
-                available_amount: dec!(1.1),
-                held_amount: dec!(1.1),
-                locked: false,
-            },
-        );
-
-        let client = clients.get_client(client_id)?;
-        assert_eq!(
-            client.available_amount,
-            dec!(1.1),
-            "client available amount should match"
-        );
-
-        assert!(
-            clients.get_client(missing_client_id).is_err(),
-            "client with invalid id should fail"
         );
 
         Ok(())

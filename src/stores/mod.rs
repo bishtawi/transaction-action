@@ -1,2 +1,2 @@
-pub mod clients;
-pub mod transactions;
+pub(crate) mod clients;
+pub(crate) mod transactions;
