@@ -11,7 +11,7 @@ use transaction_action::CSVProcessor;
 fn main() {
     let path = env::args()
         .nth(1)
-        .expect("First argument should be path to csv file");
+        .expect("First argument should be path to transactions csv file");
 
     let file = File::open(path).expect("Unable to open file");
     let reader = BufReader::new(file);

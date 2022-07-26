@@ -2,7 +2,7 @@
 
 Given a csv of transactions (deposit, withdrawal, dispute, resolve and chargeback types), this tool will process all transactions and return a csv of the client account balances.
 
-![](https://github.com/bishtawi/transaction-action/workflows/test/badge.svg)
+[![CI status](https://github.com/bishtawi/transaction-action/workflows/test/badge.svg)](https://github.com/bishtawi/transaction-action/actions/workflows/test.yml)
 
 ## Assumptions
 
@@ -28,6 +28,16 @@ The library is broken up into three layers: `CSVProcessor`, `Engine` and stores 
 2. Engine: The transaction engine that processes the incoming `TransactionRecord` by updating the datastores
 3. Stores (Clients and Transactions): Encapsulates the client and transaction databases (currently implemented as in-memory datastores)
 
+The CSV input to the CSVProcessor needs to implement `std::io::Read`, allowing the CSV data to come from more places than just a CSV file.
+
 It is a good idea to decouple the CSV parsing from the transaction business logic as future uses of the transaction engine might not be CSV related (HTTP REST API for example).
 
 Likewise, its a good idea to separate the transaction engine from the stores as the underlying database implementation may change.
+
+## Usage
+
+```
+cargo run -- path/to/transactions.csv > accounts.csv
+```
+
+The output csv (summary of client balances) is written to stdout. Errors/warnings are written to stderr.
