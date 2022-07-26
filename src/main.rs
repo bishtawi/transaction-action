@@ -6,7 +6,7 @@ use std::{
     fs::File,
     io::{self, BufReader},
 };
-use transaction_action::Processor;
+use transaction_action::CSVProcessor;
 
 fn main() {
     let path = env::args()
@@ -16,10 +16,10 @@ fn main() {
     let file = File::open(path).expect("Unable to open file");
     let reader = BufReader::new(file);
 
-    let mut processor = Processor::default();
+    let mut processor = CSVProcessor::default();
 
-    processor.process(reader);
-    if let Err(error) = processor.print_to_csv(io::stdout()) {
+    processor.process(reader, io::stderr());
+    if let Err(error) = processor.export_clients(io::stdout()) {
         eprintln!("{}", error);
     }
 }

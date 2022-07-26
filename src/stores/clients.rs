@@ -1,4 +1,4 @@
-use crate::{ClientID, Error};
+use crate::{errors::Error, ClientID};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 
