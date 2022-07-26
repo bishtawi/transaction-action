@@ -95,7 +95,10 @@ mod tests {
         let mut err_buffer = Vec::new();
         processor.process(reader, &mut err_buffer);
         let err_msg = String::from_utf8(err_buffer).expect("error logs should be utf8 characters");
-        eprintln!("{}", err_msg);
+        assert_eq!(
+            err_msg,
+            "error: client 2 cannot withdrawl 3 as available amount is 2.001\n"
+        );
 
         let mut output_buffer = Vec::new();
         processor
